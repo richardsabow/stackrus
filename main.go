@@ -39,6 +39,7 @@ import (
 type Hook struct {
 	client *logging.Client
 	logger *logging.Logger
+	labels map[string]bool
 
 	syncCtx context.Context
 	sync    bool
@@ -47,6 +48,7 @@ type Hook struct {
 func initHook(sync bool, client *logging.Client, logID string, opts ...logging.LoggerOption) *Hook {
 	h := &Hook{client: client, sync: sync, syncCtx: context.Background()}
 	h.logger = h.client.Logger(logID, opts...)
+	h.labels = make(map[string]bool)
 	return h
 }
 
@@ -69,6 +71,13 @@ func NewSync(client *logging.Client, logID string, opts ...logging.LoggerOption)
 
 func (h *Hook) SetSyncContext(ctx context.Context) {
 	h.syncCtx = ctx
+}
+
+func (h *Hook) SetLabels(labels ...string) {
+	h.labels = make(map[string]bool)
+	for _, label := range labels {
+		h.labels[label] = true
+	}
 }
 
 func mapLogrusToStackdriverLevel(l logrus.Level) logging.Severity {
@@ -104,20 +113,31 @@ func (h *Hook) Levels() []logrus.Level {
 // Fatal -> Critical
 // Panic -> Alert
 func (h *Hook) Fire(e *logrus.Entry) error {
+	payload := make(map[string]interface{})
+	labels := make(map[string]string)
+
+	payload["message"] = e.Message
+
+	for k, v := range e.Data {
+		if h.labels[k] {
+			switch t := v.(type) {
+			case string:
+				labels[k] = t
+			default:
+				labels[k] = fmt.Sprintf("%v", t)
+			}
+		} else {
+			payload[k] = v
+		}
+	}
+
 	entry := logging.Entry{
 		Timestamp: e.Time,
 		Severity:  mapLogrusToStackdriverLevel(e.Level),
-		Payload:   e.Message,
+		Payload:   payload,
+		Labels:    labels,
 	}
-	entry.Labels = make(map[string]string)
-	for k, v := range e.Data {
-		switch t := v.(type) {
-		case string:
-			entry.Labels[k] = t
-		default:
-			entry.Labels[k] = fmt.Sprintf("%v", t)
-		}
-	}
+
 	if h.sync {
 		return h.logger.LogSync(h.syncCtx, entry)
 	}
