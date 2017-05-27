@@ -126,6 +126,8 @@ func (h *Hook) Fire(e *logrus.Entry) error {
 			default:
 				labels[k] = fmt.Sprintf("%v", t)
 			}
+		} else if k == "error" {
+			payload[k] = fmt.Sprintf("%v", v)
 		} else {
 			payload[k] = v
 		}
